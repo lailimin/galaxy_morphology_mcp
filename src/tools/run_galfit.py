@@ -85,10 +85,14 @@ def _generate_subcomps(param_file: str, working_dir: str) -> tuple[list, list] |
 
         comp_images = []
         comp_types = []
+        known_components = {"sersic", "expdisk", "edgedisk", "devauc", "king",
+                            "nuker", "psf", "gaussian", "moffat", "ferrer", "sky"}
         with fits.open(subcomps_path) as hdul:
             for i in range(1, len(hdul)):
-                comp_images.append(hdul[i].data.astype(np.float64))
                 obj = hdul[i].header.get("OBJECT", f"Component {i-1}")
+                if obj.lower() not in known_components:
+                    continue
+                comp_images.append(hdul[i].data.astype(np.float64))
                 comp_types.append(obj.lower())
 
         return (comp_images, comp_types) if comp_images else None
