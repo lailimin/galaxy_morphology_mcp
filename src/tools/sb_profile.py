@@ -269,7 +269,7 @@ def render_sb_profile(ax_main, ax_resid, original_data, model_data,
             ax_resid.scatter(sma_common[vresid], residual[vresid],
                              s=8, facecolors='none',
                              edgecolors='black', linewidths=0.5)
-            ax_resid.set_ylim(-1.5, 1.5)
+            ax_resid.set_ylim(-0.5, 0.5)
 
     _style_resid_axes(ax_resid)
 
