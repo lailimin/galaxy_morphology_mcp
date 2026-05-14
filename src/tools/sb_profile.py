@@ -37,10 +37,12 @@ def parse_photometry_params(param_file: str) -> tuple[float, float]:
 
 
 def fit_data_isophotes(image_data, x_center, y_center,
-                       pa_deg=None, eps=None, sma_max=None):
+                       pa_deg=None, eps=None, sma_max=None, mask=None):
     """Fit isophotes using photutils. Returns IsophoteList or None."""
     if not HAS_PHOTUTILS:
         return None
+    if mask is not None:
+        image_data = np.ma.array(image_data, mask=mask > 0)
     # Replace NaN with 0 to prevent photutils sampling failures at image edges
     if np.any(np.isnan(image_data)):
         image_data = np.nan_to_num(image_data, nan=0.0)
@@ -82,7 +84,7 @@ def fit_data_isophotes(image_data, x_center, y_center,
     return best_result
 
 
-def extract_profile(image_data, geometry, x_offset=0, y_offset=0):
+def extract_profile(image_data, geometry, x_offset=0, y_offset=0, mask=None):
     """Extract 1D radial profile using pre-fitted isophote geometry.
 
     Args:
@@ -90,12 +92,15 @@ def extract_profile(image_data, geometry, x_offset=0, y_offset=0):
         geometry: List of (sma, eps, pa_deg, x0, y0) tuples.
         x_offset: Offset to subtract from isophote x-center.
         y_offset: Offset to subtract from isophote y-center.
+        mask: 2D mask array (mask>0 = bad pixel).
 
     Returns:
         (sma_array, intensity_array) as numpy arrays.
     """
     if not HAS_PHOTUTILS:
         return np.array([]), np.array([])
+    if mask is not None:
+        image_data = np.ma.array(image_data, mask=mask > 0)
     sma_arr, intensity_arr = [], []
     for sma, eps, pa_deg, x0, y0 in geometry:
         if sma < 1:
@@ -126,7 +131,7 @@ def intensity_to_sb(intensity, zeropoint, pixscale):
 
 def render_sb_profile(ax_main, ax_resid, original_data, model_data,
                       param_file, components, fit_region,
-                      comp_images=None, comp_types=None):
+                      comp_images=None, comp_types=None, mask=None):
     """Render 1D SB profile onto a pair of (main, residual) axes.
 
     Fits isophotes on the original data, extracts profiles for both data and
@@ -178,7 +183,7 @@ def render_sb_profile(ax_main, ax_resid, original_data, model_data,
     sma_max = min(original_data.shape) * 0.45
     isolist = fit_data_isophotes(original_data, x_cen, y_cen,
                                   pa_deg=init_pa, eps=init_eps,
-                                  sma_max=sma_max)
+                                  sma_max=sma_max, mask=mask)
     if isolist is None or len(isolist) == 0:
         ax_main.text(0.5, 0.5, 'SB Profile unavailable (isophote fitting failed)',
                      ha='center', va='center', transform=ax_main.transAxes,
@@ -197,7 +202,7 @@ def render_sb_profile(ax_main, ax_resid, original_data, model_data,
     # Model profile using same geometry
     geometry = [(iso.sma, iso.eps, np.degrees(iso.pa), iso.x0, iso.y0)
                 for iso in isolist if iso.valid]
-    sma_model, intens_model = extract_profile(model_data, geometry)
+    sma_model, intens_model = extract_profile(model_data, geometry, mask=mask)
     mu_model = intensity_to_sb(intens_model, zeropoint, pltscale)
 
     # Main SB panel
@@ -220,7 +225,7 @@ def render_sb_profile(ax_main, ax_resid, original_data, model_data,
                           for f in comp_fluxes]
 
         for i, (comp_img, comp_type) in enumerate(zip(comp_images, comp_types)):
-            sma_c, intens_c = extract_profile(comp_img, geometry)
+            sma_c, intens_c = extract_profile(comp_img, geometry, mask=mask)
             if len(sma_c) == 0:
                 continue
             mu_c = intensity_to_sb(intens_c, zeropoint, pltscale)

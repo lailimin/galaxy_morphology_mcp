@@ -272,7 +272,8 @@ def create_comparison_png(
         ax_sb_resid = fig.add_subplot(gs_sb[1], sharex=ax_sb)
         render_sb_profile(ax_sb, ax_sb_resid, original_data, model_data,
                           param_file, components, fit_region,
-                          comp_images=comp_images, comp_types=comp_types)
+                          comp_images=comp_images, comp_types=comp_types,
+                          mask=mask)
 
         # Save figure
         fits_dir = os.path.dirname(fits_file)
