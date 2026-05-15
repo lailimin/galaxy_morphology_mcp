@@ -4,7 +4,6 @@ Provides isophote-based radial profile extraction and matplotlib rendering
 of data vs model surface brightness with a residual sub-panel.
 """
 
-import os
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
@@ -192,8 +191,7 @@ def intensity_to_sb(intensity, zeropoint, pixscale):
 
 def render_sb_profile(ax_main, ax_resid, original_data, model_data,
                       param_file, components, fit_region,
-                      comp_images=None, comp_types=None, mask=None,
-                      isophote_output_path=None):
+                      comp_images=None, comp_types=None, mask=None):
     """Render 1D SB profile onto a pair of (main, residual) axes.
 
     Fits isophotes on the original data, extracts profiles for both data and
@@ -252,11 +250,6 @@ def render_sb_profile(ax_main, ax_resid, original_data, model_data,
                      fontsize=11, color='gray')
         _style_resid_axes(ax_resid)
         return
-
-    # Optionally save isophote overlay as standalone PNG
-    if isophote_output_path:
-        save_isophote_ellipses(original_data, isolist, isophote_output_path,
-                               mask=mask)
 
     sma_data = isolist.sma
     intens_data = isolist.intens
@@ -394,68 +387,6 @@ def render_isophote_panel(ax, image_data, isolist=None, mask=None,
 
     ax.set_title('Isophote Ellipses', fontsize=11)
     ax.tick_params(labelsize=9)
-
-
-def save_isophote_ellipses(image_data, isolist, output_path, mask=None):
-    """Draw all fitted isophote ellipses on the image and save as a PNG.
-
-    Args:
-        image_data: 2D image array (cropped to fit region).
-        isolist: IsophoteList from fit_data_isophotes.
-        output_path: Path to save the output PNG file.
-        mask: Optional 2D mask array (mask>0 = bad pixel).
-    """
-    if isolist is None or len(isolist) == 0:
-        return
-    if not output_path:
-        return
-
-    try:
-        fig, ax = plt.subplots(figsize=(8, 8))
-
-        display_data = image_data.copy()
-        if mask is not None:
-            display_data = np.ma.array(display_data, mask=mask > 0)
-        vmin = np.percentile(image_data[image_data > 0], 1) if np.any(image_data > 0) else 0
-        vmax = np.percentile(image_data[image_data > 0], 99) if np.any(image_data > 0) else 1
-        ax.imshow(display_data, origin='lower', cmap='gray',
-                  vmin=vmin, vmax=vmax, norm='asinh')
-
-        sma_values = np.array([iso.sma for iso in isolist if iso.valid])
-        if len(sma_values) == 0:
-            plt.close(fig)
-            return
-        norm = Normalize(vmin=sma_values.min(), vmax=sma_values.max())
-        cmap = plt.cm.plasma
-
-        for iso in isolist:
-            if not iso.valid:
-                continue
-            width = 2.0 * iso.sma
-            height = 2.0 * iso.sma * (1.0 - iso.eps)
-            angle = np.degrees(iso.pa)
-            color = cmap(norm(iso.sma))
-            ell = EllipsePatch(xy=(iso.x0, iso.y0), width=width, height=height,
-                               angle=angle, fill=False, edgecolor=color,
-                               linewidth=0.8, alpha=0.85)
-            ax.add_patch(ell)
-
-        sm = ScalarMappable(cmap=cmap, norm=norm)
-        sm.set_array([])
-        cbar = fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.04)
-        cbar.set_label('Semi-major Axis [pixels]', fontsize=11)
-
-        ax.set_title('Isophote Ellipses', fontsize=13)
-        ax.set_xlabel('X [pixels]', fontsize=11)
-        ax.set_ylabel('Y [pixels]', fontsize=11)
-        ax.set_xlim(-0.5, image_data.shape[1] - 0.5)
-        ax.set_ylim(-0.5, image_data.shape[0] - 0.5)
-
-        os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
-        fig.savefig(output_path, dpi=150, bbox_inches='tight')
-        plt.close(fig)
-    except Exception:
-        pass
 
 
 def _style_resid_axes(ax):

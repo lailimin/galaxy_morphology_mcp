@@ -274,7 +274,7 @@ def create_comparison_png(
         isolist = render_sb_profile(ax_sb, ax_sb_resid, original_data, model_data,
                                     param_file, components, fit_region,
                                     comp_images=comp_images, comp_types=comp_types,
-                                    mask=mask, isophote_output_path=None)
+                                    mask=mask)
 
         # === Isophote Ellipses (6th column) ===
         from .sb_profile import render_isophote_panel
