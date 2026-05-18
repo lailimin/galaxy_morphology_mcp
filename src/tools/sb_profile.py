@@ -248,10 +248,15 @@ def render_sb_profile(ax_main, ax_resid, original_data, model_data,
 
     sma_data = isolist.sma
     intens_data = isolist.intens
+    int_err_data = getattr(isolist, 'int_err', np.zeros_like(intens_data))
     mu_data = intensity_to_sb(intens_data, zeropoint, pltscale)
-    valid = np.isfinite(mu_data) & (intens_data > 0)
+    # Propagate intensity error to SB error: dmu = (2.5 / (ln10 * intens)) * int_err
+    with np.errstate(divide='ignore', invalid='ignore'):
+        muerr_data = (2.5 / (np.log(10) * intens_data)) * int_err_data
+    valid = np.isfinite(mu_data) & (intens_data > 0) & np.isfinite(muerr_data)
     sma_data = sma_data[valid]
     mu_data = mu_data[valid]
+    muerr_data = muerr_data[valid]
 
     # Model profile using same geometry
     geometry = [(iso.sma, iso.eps, np.degrees(iso.pa), iso.x0, iso.y0)
@@ -260,8 +265,11 @@ def render_sb_profile(ax_main, ax_resid, original_data, model_data,
     mu_model = intensity_to_sb(intens_model, zeropoint, pltscale)
 
     # Main SB panel
-    ax_main.scatter(sma_data, mu_data, s=8, facecolors='none',
-                    edgecolors='black', linewidths=0.4, zorder=5, label='Data')
+    # ax_main.scatter(sma_data, mu_data, s=8, facecolors='none',
+                    # edgecolors='black', linewidths=0.4, zorder=5, label='Data')
+    ax_main.errorbar(sma_data, mu_data, yerr=muerr_data, fmt='o', mfc='none',
+                     mec='black', ecolor='black', markersize=3,
+                     linewidth=0.4, zorder=5, label='Data')
     ax_main.plot(sma_model, mu_model, 'r--', linewidth=1.2,
                  zorder=4, label='Total Model')
 
@@ -289,8 +297,9 @@ def render_sb_profile(ax_main, ax_resid, original_data, model_data,
 
     ax_main.set_xscale('log')
     ax_main.set_ylabel(r'Surface Brightness [mag arcsec$^{-2}$]', fontsize=11)
-    ax_main.invert_yaxis()
     ax_main.set_xlim(sma_data[sma_data > 0].min() * 0.8, sma_data.max() * 1.1)
+    ax_main.set_ylim(mu_data.min() * 0.95, mu_data.max() * 1.05)
+    ax_main.invert_yaxis()
     ax_main.legend(loc='lower left', fontsize=9,
                    frameon=True, fancybox=True, framealpha=0.7)
     ax_main.set_title('1D Surface Brightness Profile', fontsize=11)
@@ -314,7 +323,7 @@ def render_sb_profile(ax_main, ax_resid, original_data, model_data,
             ax_resid.axhline(0, color='gray', linewidth=0.8)
             ax_resid.scatter(sma_common[vresid], residual[vresid],
                              s=8, facecolors='none',
-                             edgecolors='black', linewidths=0.5)
+                             edgecolors='black', linewidths=0.7)
             # Mark out-of-range points (|Δμ| > 0.5) with red triangles
             out_hi = vresid & (residual > 0.5)
             out_lo = vresid & (residual < -0.5)
@@ -361,6 +370,12 @@ def render_isophote_panel(ax, image_data, isolist=None, mask=None,
                             vmin=norm_params["vmin"], vmax=norm_params["vmax"],
                             asinh_a=norm_params["asinh_a"])
         ax.imshow(image_data, origin='lower', cmap='Greys_r', norm=snorm)
+
+    # Mask overlay (same style as first column)
+    if mask is not None and np.any(mask > 0):
+        mask_overlay = np.zeros((*mask.shape, 4))
+        mask_overlay[mask > 0] = [0, 0, 0, 0.7]
+        ax.imshow(mask_overlay, origin='lower')
 
     sma_values = np.array([iso.sma for iso in isolist if iso.valid])
     if len(sma_values) == 0:
