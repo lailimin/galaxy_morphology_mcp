@@ -42,9 +42,8 @@ def fit_data_isophotes(image_data, x_center, y_center,
                        pa_deg=None, eps=None, sma_max=None, mask=None):
     """Fit isophotes with fixed center (peak pixel), 2-step approach.
 
-    Center = peak pixel position, no background subtraction.
-    Step 1: Fixed center, large maxsma -> find outer boundary
-    Step 2: Fixed center, bounded to outer boundary
+    Step 1: Fixed center, free PA/eps, large maxsma -> find outer boundary + derive PA
+    Step 2: Fixed center, fixed PA (from Step 1), free eps, bounded maxsma
     """
     if not HAS_PHOTUTILS:
         return None
@@ -75,21 +74,31 @@ def fit_data_isophotes(image_data, x_center, y_center,
         x2 = np.sum((x_grid - cx)**2 * img_pos) / total
         y2 = np.sum((y_grid - cy)**2 * img_pos) / total
         xy = np.sum((x_grid - cx) * (y_grid - cy) * img_pos) / total
+        e0 = 0.2
         pa0 = 0.5 * np.arctan2(2 * xy, x2 - y2)
-        a2 = 0.5 * ((x2 + y2) + np.sqrt((x2 - y2)**2 + 4 * xy**2))
-        b2 = 0.5 * ((x2 + y2) - np.sqrt((x2 - y2)**2 + 4 * xy**2))
-        e0 = 1 - np.sqrt(b2 / a2) if a2 > 0 else 0.2
-        e0 = np.clip(e0, 0.01, 0.9)
     else:
         e0, pa0 = 0.2, 0.0
+
+    # ---- Edge noise for outer boundary ----
+    edge = max(3, int(dim * 0.1))
+    edge_mask = np.zeros(image_data.shape, dtype=bool)
+    edge_mask[:edge, :] = True; edge_mask[-edge:, :] = True
+    edge_mask[:, :edge] = True; edge_mask[:, -edge:] = True
+    edge_pixels = image_data[edge_mask]
+    if hasattr(edge_pixels, 'compressed'):
+        edge_pixels = edge_pixels.compressed()
+    from astropy.stats import sigma_clipped_stats
+    _, _, bg_std = sigma_clipped_stats(edge_pixels, sigma=3.0) if len(edge_pixels) > 10 else (0, 0.0, 1.0)
+    intensity_threshold = bg_std * 1.0
 
     maxsma = sma_max or (dim / 2 * 0.9)
 
     # ---- sma0 retry list ----
     sma0_list = sorted(set(min(s, dim//2 - 2) for s in [3, 5, 10]))
 
-    # ---- Fit with fixed center ----
-    iso_best = None
+    # ---- Step 1: fixed center, free PA/eps, large maxsma ----
+    iso_step1 = None
+    maxsma_bounded = None
 
     for sma0 in sma0_list:
         try:
@@ -98,7 +107,41 @@ def fit_data_isophotes(image_data, x_center, y_center,
                 sma=sma0, eps=e0, pa=pa0
             )
             ellipse = Ellipse(image_data, geometry)
-            iso_best = ellipse.fit_image(
+            iso_step1 = ellipse.fit_image(
+                fix_center=True, fix_pa=False, fix_eps=False,
+                minsma=1, maxsma=maxsma, step=0.2, maxgerr=0.5
+            )
+            if iso_step1 is not None and len(iso_step1.sma) > 0:
+                # Find outer boundary
+                indices = np.where(iso_step1.intens < intensity_threshold)[0]
+                out_idx = indices[0] if len(indices) > 0 else len(iso_step1.sma) - 1
+                maxsma_bounded = iso_step1.sma[min(out_idx, len(iso_step1.sma) - 1)]
+                break
+        except Exception:
+            continue
+
+    if iso_step1 is None or len(iso_step1.sma) == 0:
+        return None
+
+    # ---- Derive PA from Step 1 isophotes within outer boundary ----
+    pas = np.array([iso.pa for iso in iso_step1
+                    if iso.valid and iso.sma <= maxsma_bounded])
+    if len(pas) > 0:
+        pa_refined = np.arctan2(np.mean(np.sin(pas)), np.mean(np.cos(pas)))
+    else:
+        pa_refined = pa0
+
+    # ---- Step 2: fixed center, fixed PA, free eps, bounded maxsma ----
+    iso_best = None
+
+    for sma0 in sma0_list:
+        try:
+            geometry2 = EllipseGeometry(
+                x0=int(round(cx)), y0=int(round(cy)),
+                sma=sma0, eps=e0, pa=pa_refined
+            )
+            ellipse2 = Ellipse(image_data, geometry2)
+            iso_best = ellipse2.fit_image(
                 fix_center=True, fix_pa=True, fix_eps=False,
                 minsma=1, maxsma=maxsma, step=0.1, maxgerr=0.5
             )
@@ -107,12 +150,12 @@ def fit_data_isophotes(image_data, x_center, y_center,
                 break
 
             # Retry with adjusted eps
-            geometry2 = EllipseGeometry(
+            geometry3 = EllipseGeometry(
                 x0=int(round(cx)), y0=int(round(cy)),
-                sma=sma0, eps=min(e0 + 0.1, 0.9), pa=pa0
+                sma=sma0, eps=min(e0 + 0.1, 0.9), pa=pa_refined
             )
-            ellipse2 = Ellipse(image_data, geometry2)
-            iso_best = ellipse2.fit_image(
+            ellipse3 = Ellipse(image_data, geometry3)
+            iso_best = ellipse3.fit_image(
                 fix_center=True, fix_pa=True, fix_eps=False,
                 minsma=1, maxsma=maxsma, step=0.1, maxgerr=0.5
             )
@@ -121,7 +164,7 @@ def fit_data_isophotes(image_data, x_center, y_center,
         except Exception:
             continue
 
-    return iso_best
+    return iso_best if iso_best is not None else iso_step1
 
 
 def extract_profile(image_data, geometry, x_offset=0, y_offset=0, mask=None):
